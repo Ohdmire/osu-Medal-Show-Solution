@@ -1,7 +1,11 @@
 // ==UserScript==
 // @name         osu! Medal Show Solution
+// @name:en      osu! Medal Show Solution
+// @name:zh-CN   osu! 显示奖章达成方法
 // @namespace    https://github.com/Ohdmire
 // @description  show medal solution panel using Osekai
+// @description:en  show medal solution panel using Osekai
+// @description:zh-CN  使用 Osekai 的数据展示 osu! 奖章达成的方法
 // @author       ATRI1024
 // @version      1.0
 // @match        https://osu.ppy.sh/*
