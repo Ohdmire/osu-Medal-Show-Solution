@@ -6,8 +6,9 @@
 // @description  show medal solution panel using Osekai
 // @description:en  show medal solution panel using Osekai
 // @description:zh-CN  使用 Osekai 的数据展示 osu! 奖章达成的方法
+// @icon         https://osu.ppy.sh/images/favicon/favicon-32x32.png
 // @author       ATRI1024
-// @version      1.0
+// @version      1.1
 // @match        https://osu.ppy.sh/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_registerMenuCommand
@@ -22,6 +23,8 @@
     let medalMap = new Map();
     let floatingBox = null;
     let pinned = false;
+    let dataLoaded = false;
+    let dataLoading = null;
 
     /* -------------------------
      * WaitForElement: DOM Ready
@@ -64,38 +67,71 @@
         );
     }
 
-    function fetchMedals(force = false) {
-        if (!force && loadCache()) return;
-
-        console.log('[Medal] Fetching medal preload…');
-
-        GM_xmlhttpRequest({
-            method: 'GET',
-            url: 'https://inex.osekai.net/medals/',
-            onload(res) {
-                const match = res.responseText.match(
-                    /const medals_preload\s*=\s*(\{[\s\S]*?\});/
-                );
-
-                if (!match) {
-                    console.error('[Medal] preload not found');
-                    return;
-                }
-
-                const preload = JSON.parse(match[1]);
-
-                medalMap.clear();
-                preload.content.forEach(m => {
-                    medalMap.set(
-                        m.Name,
-                        m.Solution || 'No solution available.'
+    function fetchMedalsFromNetwork() {
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: 'https://inex.osekai.net/medals/',
+                onload(res) {
+                    const match = res.responseText.match(
+                        /const medals_preload\s*=\s*(\{[\s\S]*?\});/
                     );
-                });
 
-                saveCache();
-                console.log('[Medal] Cached medals:', medalMap.size);
-            },
+                    if (!match) {
+                        reject(new Error('preload not found'));
+                        return;
+                    }
+
+                    const preload = JSON.parse(match[1]);
+
+                    medalMap.clear();
+                    preload.content.forEach(m => {
+                        medalMap.set(
+                            m.Name,
+                            m.Solution || 'No solution available.'
+                        );
+                    });
+
+                    saveCache();
+                    console.log('[Medal] Fetched from network:', medalMap.size);
+                    resolve();
+                },
+                onerror: reject
+            });
         });
+    }
+
+    function ensureDataLoaded() {
+        if (dataLoaded) return Promise.resolve();
+        if (dataLoading) return dataLoading;
+
+        dataLoading = (async () => {
+            // 先尝试从缓存加载
+            if (loadCache()) {
+                dataLoaded = true;
+                return;
+            }
+
+            // 缓存没有则从网络加载
+            try {
+                await fetchMedalsFromNetwork();
+                dataLoaded = true;
+            } catch (error) {
+                console.error('[Medal] Failed to load data:', error);
+                throw error;
+            }
+        })();
+
+        return dataLoading;
+    }
+
+    function fetchMedals(force = false) {
+        if (force) {
+            dataLoaded = false;
+            dataLoading = null;
+            localStorage.removeItem(STORAGE_KEY);
+        }
+        return ensureDataLoaded();
     }
 
     /* -------------------------
@@ -208,6 +244,15 @@
             });
     }
 
+    async function scanAfterDataLoaded() {
+        try {
+            await ensureDataLoaded();
+            scan();
+        } catch (error) {
+            console.error('[Medal] Cannot scan without data:', error);
+        }
+    }
+
     /* -------------------------
      * Turbo Event Listener (SPA)
      * ------------------------- */
@@ -219,7 +264,7 @@
         floatingBox = null;
 
         WaitForElement('img.badge-achievement__image', () => {
-            scan();
+            scanAfterDataLoaded();
         });
     }
 
@@ -238,15 +283,20 @@
 
     document.addEventListener('turbo:load', run);
     document.addEventListener('turbo:before-visit', handleTurboLeave);
-    // document.addEventListener('turbo:before-cache', handleTurboLeave);
 
     /* -------------------------
      * Menu Command
      * ------------------------- */
-    GM_registerMenuCommand('Refresh Medal Cache', () => {
-        localStorage.removeItem(STORAGE_KEY);
-        fetchMedals(true);
-        alert('Medal cache refreshed');
+    GM_registerMenuCommand('Refresh Medal Cache', async () => {
+        try {
+            await fetchMedals(true);
+            alert('Medal cache refreshed');
+            if (window.location.pathname.startsWith('/users/')) {
+                scan();
+            }
+        } catch (error) {
+            alert('Failed to refresh medal cache');
+        }
     });
 
     /* -------------------------
